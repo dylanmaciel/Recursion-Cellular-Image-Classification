@@ -41,14 +41,7 @@ print(meta_train_controls.shape)
 #  the following imports one of the specified files 
 im = Image.open('./B02/B02_s1_w1.png')
 
-# so we need to use the cs files to specify the path when getting images
-# keep track of well_type
+# so we need to use the csv files to specify the path for getting images
 
-# finding the image path
-
-for i in range(1, meta_train.shape[1]):
-    experiment = meta_train[i].experiment
-    well = meta_train[i].well
-    plate = meta_train[i].plate
 
 
