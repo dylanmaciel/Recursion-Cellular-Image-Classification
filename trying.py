@@ -18,7 +18,14 @@ import pandas as pd
 
 from PIL import Image
 
+# need to figure out how to use the following packages
+import torch
+import torch.nn as nn
+import torch.utils.data as D
+import torch.nn.functional as F
 
+import torchvision
+from torchvision import transforms as T
 
 # this changes the working directory
 import os 
