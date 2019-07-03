@@ -45,10 +45,41 @@ print(meta_train.shape)
 meta_train_controls = pd.read_csv('train_controls.csv')
 print(meta_train_controls.shape)
 
-#  the following imports one of the specified files 
-im = Image.open('./B02/B02_s1_w1.png')
+# a function to combine the meta data 
 
-# so we need to use the csv files to specify the path for getting images
+
+
+# the following tranforms into array of arrays that are ided by column
+# i.e. puts each row of the csv as an elements of an array 
+# can then call by index and then .dtype
+records = meta_train.to_records(index = False)
+experiment1 = records[1].experiment
+plate1 = records[1].plate
+well1 = records[1].well
+
+def img_path(meta_data, index, site, channel):
+    
+    # well will be specified from the train.csv
+    # channel can be (one of 1,2,3,4,5,6)
+    # site can be 1 or 2
+    
+    experiment = meta_data[index].experiment
+    plate = meta_data[index].plate
+    well = meta_data[index].well
+    
+    img_path = "train/" + str(experiment) + '/Plate' + str(plate)
+    
+    img_name  = '/' + str(well) + '_s' +str(site) + '_w'+ str(channel) + '.png'
+    
+    return img_path + img_name
+ 
+# we can now open any image by spcifying a few numbers
+img = Image.open(img_path(records, 1, 1, 6))
+img
+
+# next, need to 
+
+s
 
 
 
