@@ -30,11 +30,11 @@ import torch.nn.functional as F
 import torchvision
 from torchvision import transforms as T
 
-<<<<<<< HEAD
+
 # this changes the working directory
 import os 
 os.chdir('C:/Users/dylan/Documents/Recursion-Cellular-Image-Classification')
-=======
+
 import tensorflow as tf
 from skimage.io import imread
 import cv2
@@ -47,7 +47,6 @@ import rxrx.io as rio
 # this changes the working directory
 import os 
 #os.chdir('C:/Users/dylan/Documents/Recursion-Cellular-Image-Classification')
->>>>>>> ImageViewing
 
 
 
@@ -107,14 +106,9 @@ meta_records = meta_comb.to_records(index = False)
 img = Image.open(img_path(meta_records, 'train', 1, 1, 1))
 img
 
-<<<<<<< HEAD
 # next, I want to make an rgb image of the 6 layers
  
 
-
-
-
-=======
 #------------------------------------------------------------------------------#
 #                                                                              #
 #  Below, creating RGB image generating function(s)                            #
