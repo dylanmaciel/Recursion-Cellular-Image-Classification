@@ -184,3 +184,4 @@ im1 = rgb_img(meta_records,main_folder = 'train',  index = 30478+96, site = 1)
 ## Saving image
 cv2.imwrite("test3.png", im1)
 
+ahah
