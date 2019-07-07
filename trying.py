@@ -168,7 +168,7 @@ def rgb_img(record, main_folder, index, site):
     
     for i in range(0,6) :
         
-        tensor_img[:,:,i] = imread(img_path(record, 
+        tensor_img[:,:,i] = Image.open(img_path(record, 
                                             main_folder, 
                                             index, 
                                             site, 
@@ -176,12 +176,13 @@ def rgb_img(record, main_folder, index, site):
     
     rgb_img = convert_tensor_to_rgb(tensor_img)
     
-    return(rgb_img)
+    return(rgb_img, tensor_img)
     
 ## Running above function
-im1 = rgb_img(meta_records,main_folder = 'train',  index = 30478+96, site = 1)
+im1_rgb, im1_tensor = rgb_img(meta_records,main_folder = 'train',  index = 10, site = 1)
 
 ## Saving image
 cv2.imwrite("test3.png", im1)
 
-ahah
+test = Image.open(img_path(meta_records, "train", 17, 1, 1))
+T.ToTensor()(test)
