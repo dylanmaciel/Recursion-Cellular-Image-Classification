@@ -14,7 +14,6 @@
 
 import sys
 
->>>>>>> ImageViewing
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -180,8 +179,8 @@ def rgb_img(record, main_folder, index, site):
     return(rgb_img)
     
 ## Running above function
-im1 = rgb_img(meta_records,main_folder = 'train',  index = 30478+4096, site = 1)
+im1 = rgb_img(meta_records,main_folder = 'train',  index = 30478+96, site = 1)
 
 ## Saving image
-cv2.imwrite("test2.png", im1)
+cv2.imwrite("test3.png", im1)
 
