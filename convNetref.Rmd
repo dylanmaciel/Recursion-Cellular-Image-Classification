@@ -1,0 +1,1293 @@
+---
+title: "STAT 853 - Final Project - R Code"
+author: "Barinder Thind - 301193363"
+date: "March 24, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is the R Markdown file containing all my code for the STAT 853 final project. I will organize this code as follows:
+
+0) Libraries and miscellanous pre-processing are given here
+
+1) I present code for all the plots I made unless those plots were related specifically to a model. For example, error plots over iterations will be contained within their own code chunks alongside the model code however, plots made for the purposes of examples (such as the Euler's method proof of concept example) will be given here.
+
+2) I present code on Recurrent Neural Networks. There is two separate chunks of code here; this includes an example of a neural net from scratch and an example of a neural net using Keras package
+
+3) I present code on Residual Neural Networks. Here, the code was made using convolutional neural networks from Keras and Tensorflow packages with residual blocks. 
+
+4) Lastly, I present (incomplete) code on Neural ODEs. The first half of this section is -complete- python code that I sourced - essentially, I am going through what's underneath the hood along with an MNIST dataset implementation. In the second half of this section, I have begun work on converting over this method to R in hopes of ultimately publishing a package. My code here is what I have done thus far. Some of the plots in the final report come from a python jupyter notebook.
+
+NOTE: The iterative error plots will not show up in the knit markdown files however, they will show up only during the run of the model. For example, the R keras recurrent neural network found in section 2, when that code chunk is run in a script, the loss plot renders as the code runs however, it doesn't get plotted in the markdown. This is true for the convolutional error plot as well.
+
+NOTE: In sections 2 and 3, I changed the number of "epochs" to 10 - this can easily be adjusted but for computation time, I moved it down. In the paper, the results are shown for 150 epochs. 
+
+NOTE: In section 4, the number of epochs is reduced from 5 to 1 for similar reasons as the previous note.
+
+
+######################### SECTION 0 ##############################
+
+```{r}
+library(reshape)
+library(ggplot2)
+library(dplyr)
+library(grid)
+library(pracma)
+library(rmutil)
+library(deSolve)
+library(RJSONIO)
+library(keras)
+library(abind)
+library(kohonen)
+library(tidyr)
+library(tensorflow)
+require(gridExtra)
+```
+
+
+######################### SECTION I ##############################
+
+First, I present code on Euler's method:
+
+```{r}
+### Euler Method Example
+
+## Making exact plot
+x = seq(0, 3, 0.01)
+e_df = data.frame(x = x, y = exp(x))
+
+## Getting iterations
+x_1 = seq(0, 1, 0.01)
+x_2 = seq(1.0, 2, 0.01)
+x_3 = seq(2.0, 3, 0.01)
+y_0 = 1; y_1 = y_0 + 1; y_2 = y_1 + 2; y_3 = y_2 + 4;
+iter1 = data.frame(x = 1, y_1 = y_1)
+iter2 = data.frame(x = 2, y_2 = y_2)
+iter3 = data.frame(x = 3, y_3 = y_3)
+
+## Plotting
+e_df %>% 
+  ggplot(aes(x = x, y = y)) + 
+  geom_line(size = 1.25) + 
+  geom_segment(data = iter1, 
+            aes(x = 0, y = 1, xend = x, yend = y_1), 
+            color = "blue",
+            size = 1.5) +
+  geom_segment(data = iter2, 
+               aes(x = 1, y = y_1, xend = x, yend = y_2), 
+               color = "steelblue3",
+               size = 1.5) +
+  geom_segment(data = iter3, 
+               aes(x = 2, y = y_2, xend = x, yend = y_3), 
+               color = "steelblue2",
+               size = 1.5) +
+  ggtitle("An Application of Euler's Method") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+
+
+```
+
+Next, I present the code for the solutions curves:
+
+```{r}
+### Solutions Curves
+
+# x Values
+x = seq(0, 7, 0.01)
+
+# Solution function for ODE
+y = function(y_o) {return(3 + (y_o - 3)*exp(-x/2))}
+
+# Creating data frame
+solution_curves = data.frame(cbind(x, apply(as.matrix(0:7), 1, FUN = y)))
+reshaped_solutions <- melt(solution_curves ,  id.vars = 'x')
+
+# Plotting
+reshaped_solutions %>% 
+  ggplot(aes(x, value)) + 
+  geom_line(aes(colour = variable)) + 
+  ggtitle("Solution Curves for:\n dy/dx + y/2 = 3/2") + 
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab("x") + 
+  ylab("y") +
+  labs(color = "Initial Condition\n Values for y(0)") +
+  scale_color_hue(labels = as.character(0:7))
+
+```
+
+Next, I present the code for a runge-kutta comparison. This was part of tests done to find good ODE solvers for the Neural ODE section. The plot here wasn't given in the final report but was relevant to the thought process:
+
+```{r}
+### Solving using Runge Kutta
+## By package
+
+# Defining ODE
+ode <- function(x, y){
+  return((1/2)*(3 - y))
+}
+
+# Defining initial condition
+y_initial <-  2
+
+# x values
+x = seq(0, 7, 0.01)
+
+# Solution function for ODE
+y = function(y_o) {return(3 + (y_o - 3)*exp(-x/2))}
+
+# Creating data frame
+solution_curves = data.frame(cbind(x, apply(as.matrix(0:7), 1, FUN = y)))
+
+# Running runge-kutta
+runge_solution <- runge.kutta(ode, y_initial, x)
+
+# Making data frame for comparison
+comp_df <- melt(data.frame(x = x, approx_sol = runge_solution, exact_sol = solution_curves$V4),
+                id.vars = "x")
+
+# Plotting exact vs. approx
+comp_df %>% 
+  ggplot(aes(x, value)) + 
+  geom_line(aes(colour = variable)) + 
+  ggtitle("Runge Kutta vs. Exact Solution") + 
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab("x") + 
+  ylab("y") +
+  labs(color = "Curve") +
+  scale_color_manual(labels = c("Approximate Solution", "Exact Solution"),
+                    values = c("Blue", "Green"))
+
+# Using alternative function
+
+# Defining ODE again
+ode_rk4 <- function(t, y, parms){
+  dydx = (a)*(b - y)
+  return(list(dydx))
+}
+
+# Defining parameters
+x = seq(0, 7, 0.01)
+a = 1/2
+b = 3
+parms = c(a = a, b = b)
+y_initial = c(y_initial = 2)
+
+# Running from deSolve package
+runge_solution_rk4 <- rk4(y_initial, x, ode_rk4, parms)
+
+# Creating data frame
+rk4_df <- melt(data.frame(x = x, 
+                          approx_sol = runge_solution_rk4[,2] + 0.1, 
+                          exact_sol = solution_curves$V4),
+                id.vars = "x")
+  
+# Plotting
+rk4_df %>% 
+  ggplot(aes(x, value)) + 
+  geom_line(aes(colour = variable)) + 
+  ggtitle("Runge Kutta vs. Exact Solution\n Using deSolve") + 
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab("x") + 
+  ylab("y") +
+  ylim(c(0, 6)) +
+  labs(color = "Solutions") +
+  scale_color_manual(labels = c("Approximate Solution", "Exact Solution"),
+                     values = c("Blue", "Green"))
+
+```
+
+Next, I present code for vector fields; again, these serve as a valuable tool in ultimately understanding Neural ODE's.
+
+```{r}
+# Defining ODE; dy/dx = x - y
+ode <- function(x, y){
+  return(x - y)
+}
+
+# Evaluating slopes
+combo_values <- expand.grid(list(x = seq(-4, 4, 0.1), y = seq(-4, 4, 0.1)))
+
+# Running function through these combinations
+combo_values$ODEvalue <- ode(combo_values$x, combo_values$y)
+
+# Plotting vector field using ggplot
+combo_values %>% 
+  ggplot(aes(x = x, y = y)) + 
+  theme_bw() +
+  geom_segment(aes(x = x, y = y, xend = x + 0.1, 
+               yend = y + ODEvalue), 
+               arrow = arrow(length = unit(0.2,"cm")),
+               size = 1)
+
+# Plotting in another way
+xx <- c(-4, 4)
+yy <- c(-4, 4)
+vectorfield(ode, xx, yy, scale = 0.1, col = "blue")
+title(main = "Vector Field for Example ODE")
+
+# Plotting solutions
+#for (xs in seq(-4, 4, by = 0.25)) {
+#  sol <- rk4(ode, -4, 4, xs, 100)
+#  lines(sol$x, sol$y, col="darkgreen")
+#}
+
+```
+
+Next, I present code for phase portraits. These were useful for the interpretation of some Neural ODE plots.
+
+```{r}
+# Defining ODE; dy/dx = x - y
+ode <- function(x, y, a, r){
+  K = r/a
+  return(r*(1 - (y/K))*y)
+}
+
+# Generating data
+y = seq(-1, 4.5, 0.1)
+dy = ode(0, y, 1, 3)
+phase_data = data.frame(y, dy)
+
+# Plotting
+phase_data %>% 
+  ggplot(aes(x = y, y = dy)) + 
+  geom_line() +
+  theme_bw() +
+  labs(x = "y", y = bquote(frac(dy, dt)), title = "Phase Portrait for Logistic Growth") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = 0, color = "Blue") +
+  geom_segment(aes(x = y[which.max(dy)],
+                   y = dy[which.max(dy)],
+                   xend = y[which.max(dy)],
+                   yend = 0), 
+             color = "purple",
+             linetype="dashed",
+             size = 1) +
+  geom_point(data = data.frame(x = y[which(dy == 0)], y = dy[which(dy == 0)]),
+             aes(x = x, y = y),
+             color = "red",
+             size = 3) + 
+  geom_point(aes(x = y[which.max(dy)], y = dy[which.max(dy)]),
+             color = "purple",
+             size = 3) +
+  geom_segment(data = data.frame(a = c(0.5, 2), b = c(0, 0)),
+                   aes(x = a, y = b, 
+                   xend = a + 0.25, 
+                   yend = b), 
+               arrow = arrow(length = unit(0.3, "cm")),
+               size = 1) +
+  geom_segment(data = data.frame(a = c(4), b = c(0)),
+               aes(x = a + 0.25, y = b, 
+                   xend = a, 
+                   yend = b), 
+               arrow = arrow(length = unit(0.3, "cm")),
+               size = 1) +
+  geom_label(data = data.frame(x = y[which(dy == 0)], 
+                               y = dy[which(dy == 0)],
+                               state = c("Unstable Equilibrium", "Stable Equilibrium")),
+             aes(x = x, y = y, label = state),
+             nudge_y = -0.5)
+
+
+```
+
+Next, just for completeness, I present the following "error plot" - this is just random data, the goal of this plot was more just intuition:
+
+```{r}
+
+## Plotting
+ggplot(data = data.frame(x = 1:125, y = c(1/((1:70)), 1/((70)) + 0.0001*((1:55)^2))),
+       aes(x = x, y = y)) +
+  geom_line(size = 1.25, color = "blue") +
+  theme_bw() +
+  labs(x = "Number of Layers", y = "Training Error Rate") + 
+  geom_line(data = data.frame(x = 1:125, y = c(1.1/((1:125)))),
+            aes(x = x, y = y), color = "steelblue2", size = 1.25) +
+  ggtitle("Theoretical v. Actual Error Rates\n Plain Neural Network") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_label(data = data.frame(x = 100, 
+                               y = 1,
+                               state = c("Light Blue Curve = Theoretical Error\nBlue Curve = Error in Practice")),
+             aes(x = x, y = y, label = state),
+             nudge_y = -0.5)
+
+```
+
+Here's the code for the DE Activations vs. the ResNet Activations:
+
+```{r}
+## Plotting DE Layers
+x = seq(0, 3, 0.001)
+de_hidden <- data.frame(x = x, y = 1/(1 + exp(-x))) %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_line() +
+  theme_bw() +
+  labs(x = "t \n(depth)", y = "h(t)") +
+  ggtitle("Differential Equation Defining the \nHidden Activations for a Neural Network") +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+## Plotting recurrent NN Layers
+disc_hidden <- data.frame(x = x, y = 1/(1 + exp(-x))) %>% 
+  ggplot(aes(x = x, y = )) +
+  geom_segment(aes(x = 0, y = 0, xend = 1, yend = 0.75)) + 
+  geom_segment(aes(x = 1, y = 0.75, xend = 2, yend = 0.9)) +
+  geom_segment(aes(x = 2, y = 0.9, xend = 3, yend = 0.97)) +
+  theme_bw() +
+  labs(x = "t \n(depth)", y = "h(t)") +
+  ggtitle("Discrete Hidden Layers Defining the \nHidden Activations for a Neural Network") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_point(aes(x = 0, y = 0), color = "red", size = 2) +
+  geom_point(aes(x = 1, y = 0.75), color = "red", size = 2) +
+  geom_point(aes(x = 2, y = 0.9), color = "red", size = 2) +
+  geom_point(aes(x = 3, y = 0.97), color = "red", size = 2)
+
+## Plotting together
+grid.arrange(disc_hidden, de_hidden, ncol = 2)
+```
+
+
+######################### SECTION II #############################
+
+First, I present the code for the Neural Network from scratch. The derivates are calculated in accordance to the chain rule and under the backpropagation approach. Loss is calculated and plotted in the end along with the iterations. 
+
+The three outputs will be:
+
+1) A preview of the data set
+2) the loss at the end beginning, before training and after taining
+3) A graph showcasing the error after each epoch
+
+```{r}
+### Setting seed
+set.seed(25)
+
+## Defining data frame
+x <- rnorm(100)
+y <- ifelse(x >= -0.5 & x <= 0.5, 1, 0)
+gaussian_df <- sample(data.frame(rn = x, resp = y))
+
+## Poisoning the data
+#gaussian_df[sample(which(gaussian_df$resp == 1), 25),] = 0
+
+## Looking at data set
+head(gaussian_df)
+
+## Activation Function
+sigmoid <- function(x) {
+  return(1.0/(1.0 + exp(-x)))
+}
+
+## Derivative of the activation
+sigmoid_deriv <- function(x) {
+  return(x*(1.0 - x))
+}
+
+## Loss Function
+MSE <- function(neural_net) {
+  return(mean((neural_net$y - round(neural_net$output))^2))
+}
+
+## Initializing
+layer_weights_1 <- c(runif(length(gaussian_df$rn)))
+layer_weights_2 <- c(runif(length(gaussian_df$rn)))
+layer_bias_1 <- c(runif(length(gaussian_df$rn)))
+layer_bias_2 <- c(runif(length(gaussian_df$rn)))
+
+## Setting up neural network list
+neuralnet_info <- list(
+  input = gaussian_df$rn,
+  layer_weights_1 = layer_weights_1,
+  layer_bias_1 = layer_bias_1,
+  layer_weights_2 = layer_weights_2,
+  layer_bias_2 = layer_bias_2,
+  y = gaussian_df$resp,
+  output = matrix(rep(0, 1000), ncol = 1)
+)
+
+## Forward pass
+forward_pass <- function(neural_net) {
+  
+  # Layer 1 activations
+  neural_net$layer1 <- c(sigmoid(neural_net$input * neural_net$layer_weights_1 + 
+                                   layer_bias_1))
+  
+  # Output activations
+  neural_net$output <- c(sigmoid(neural_net$layer1 * neural_net$layer_weights_2 + 
+                                   layer_bias_2))
+  
+  return(neural_net)
+}
+
+## Backpropagation
+grad_descent <- function(neural_net){
+  
+  ## Easier derivative first
+  # weights closer to the output layer
+  deriv_weights2 <- (
+    neural_net$layer1*(2*(neural_net$y - neural_net$output)*sigmoid_deriv(neural_net$output))
+  )
+  
+  ## Backpropagating to first layer
+  # Applied chain rule here
+  deriv_weights1 <- (2*(neural_net$y - neural_net$output)*sigmoid_deriv(neural_net$output))*neural_net$layer_weights_2
+  deriv_weights1 <- deriv_weights1*sigmoid_deriv(neural_net$layer1)
+  deriv_weights1 <- neural_net$input*deriv_weights1
+  
+  ## Now need to do bias derivatives
+  deriv_bias2 <- 2*(neural_net$y - neural_net$output)*sigmoid_deriv(neural_net$output)
+  deriv_bias1 <- 2*(neural_net$y - neural_net$output)*sigmoid_deriv(neural_net$output)*layer_weights_2*sigmoid_deriv(neural_net$layer1)
+  
+  # Weight update using derivative
+  learn_rate = 1
+  neural_net$layer_weights_1 <- neural_net$layer_weights_1 + learn_rate*deriv_weights1
+  neural_net$layer_weights_2 <- neural_net$layer_weights_2 + learn_rate*deriv_weights2
+  neural_net$layer_bias_1 <- neural_net$layer_bias_1 + learn_rate*deriv_bias1
+  neural_net$layer_bias_2 <- neural_net$layer_bias_2 + learn_rate*deriv_bias2
+  
+  # Returning updated information
+  return(neural_net)
+  
+}
+
+## Error Rate after no iterations
+mean(round(neuralnet_info$output) == gaussian_df$resp)
+
+## Epochs
+epoch_num <- 50
+
+## Initializing loss vector
+lossData <- data.frame(epoch = 1:epoch_num, MSE = rep(0, epoch_num))
+
+## Training Neural Net
+for (i in 1:epoch_num) {
+  
+  # Foreward iteration
+  neuralnet_info <- forward_pass(neuralnet_info)
+  
+  # Backward iteration
+  neuralnet_info <- grad_descent(neuralnet_info)
+  
+  # Storing loss
+  lossData$MSE[i] <- MSE(neuralnet_info)
+  
+}
+
+## Error Rate after 50 iterations
+mean(round(neuralnet_info$output) == gaussian_df$resp)
+
+## Plotting Loss
+lossData %>% 
+  ggplot(aes(x = epoch, y = MSE)) + 
+  geom_line(size = 1.25, color = "steelblue2") +
+  theme_bw() +
+  labs(x = "Epoch #", y = "MSE") +
+  ggtitle("Change in Loss - Simple Neural Net") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+## Making a test set
+# x <- rnorm(25)
+# y <- ifelse(x >= -0.5 & x <= 0.5, 1, 0)
+# gaussian_df_test <- sample(data.frame(rn = x, resp = y))
+
+## Making Predictions on the test set
+
+# Layer 1 activations
+# test_results <- NULL
+
+# test_results$layer1 <- c(sigmoid(gaussian_df_test$rn * neuralnet_info$layer_weights_1 + 
+#                                 neuralnet_info$layer_bias_1))
+
+# Output activations
+# test_results$output <- c(sigmoid(test_results$layer1 * neuralnet_info$layer_weights_2 + 
+#                                 neuralnet_info$layer_bias_2))
+
+# Predictions
+## Error Rate after 50 iterations
+# mean(round(test_results$output) == gaussian_df_test$resp)
+
+
+```
+
+Next, I present the code for the recurrent neural network using Keras. In the end, a loss output will be given over the epochs along with a final error rate. The data set used was the iceberg/ship kaggle data set. More details available in the final report. I read in the code in the first chunk and the rest of the results in the second. This is because the data set is massive and takes time to load in.
+
+```{r}
+### Final NN Code Using Iceberg Dataset
+
+## Setting seed
+set.seed(1)
+
+## Reading in dataset
+
+# Iceberg data
+train = fromJSON("train.json")
+
+# Getting relevant information
+x <- train %>% 
+  lapply(function(x){c(x$band_1, x$band_2)}) %>% 
+  unlist %>% 
+  array(dim=c(75, 75, 1604)) %>% 
+  aperm(c(3, 1, 2))
+
+# Values for Output
+y <- classvec2classmat(unlist(lapply(train, function(x) {x$is_iceberg})))
+```
+
+```{r}
+# Training Set list
+nums <- sample(1:1604, 1300)
+
+# Organizing
+train_iceberg <- x[nums, , ]
+train_truth <- y[nums, 2]
+test_iceberg <- x[-nums, , ]
+test_truth <- y[-nums, 2]
+
+# Class Names
+iceberg_name <- c("Not an Iceberg", "An Iceberg")
+
+## Need to scale data
+train_iceberg <- train_iceberg/max(abs(train_iceberg))
+test_iceberg <- test_iceberg/max(abs(train_iceberg))
+
+## Looking at the first 25 images
+par(mfcol=c(5,5))
+par(mar=c(0, 0, 1.5, 0), xaxs='i', yaxs='i')
+for (i in 1:25) { 
+  img <- train_iceberg[i, , ]
+  img <- t(apply(img, 2, rev)) 
+  image(1:75, 1:75, img, col = gray((-44:0)/-44), xaxt = 'n', yaxt = 'n',
+        main = paste(iceberg_name[train_truth[i] + 1]))
+}
+
+#### Creating model
+
+# Initialization
+iceberg_nn <- keras_model_sequential()
+
+# Adding Layers
+iceberg_nn %>%
+  layer_flatten(input_shape = c(75, 75)) %>% # Turning image into 784 input variables
+  layer_dense(units = 128, activation = 'relu') %>% # 128 neurons with relu activation, HL1
+  layer_dense(units = 128, activation = 'relu') %>% # 128 neurons with relu activation, HL2
+  layer_dense(units = 128, activation = 'relu') %>% # 128 neurons with relu activation, HL3
+  layer_dense(units = 128, activation = 'relu') %>% # 128 neurons with relu activation, HL4
+  layer_dense(units = 1, activation = 'sigmoid') # Output layer: 1 of 10 things with softmax
+# activation function
+
+## Densely connected means FULLY-CONNECTED (EACH NEURON IS INVOLVED IN THE CALCULATION OF
+# EVERY SINGLE NEURON IN THE NEXT LAYER)
+
+## Adding loss function and optimizer
+iceberg_nn %>% compile(
+  optimizer = "sgd", # Using stochastic gradient descent as backprop method
+  loss = 'binary_crossentropy', # Using cross-entropy as loss evaluator
+  metrics = c('accuracy') # Looking at accuracy
+)
+
+## Summary of model
+summary(iceberg_nn)
+
+## Fitting the model
+iceberg_nn %>% fit(train_iceberg, train_truth, epochs = 10)
+
+## Seeing the accuracy
+score <- iceberg_nn %>% evaluate(test_iceberg, test_truth)
+# Alternative: predictions_nn <-  mean(round(predict(iceberg_nn, test_iceberg)) == test_truth)
+paste("Test Accuracy (NN):", score$acc)
+
+
+```
+
+Note here that I used 150 epochs as a standard. This is just a rule of thumb but there is no real reason to adhere to this. For faster computation, lower the number of epochs.
+
+######################### SECTION III ############################
+
+In this section, I switch focus to residual neural networks. I use this approach in the context of convolutional neural networks. Note that the data set needs to be pre-processed in a slightly different way here and so, this adds a bit to the computation time.
+
+```{r}
+# Getting relevant information
+x = train %>% lapply(function(x){
+  c(x$band_1, 
+    x$band_2, 
+    apply(cbind(x$band_1,x$band_2), 1, mean))}) %>% 
+  unlist %>% 
+  array(dim=c(75,75,3,1604)) %>% 
+  aperm(c(4,1,2,3))
+
+# Values for Output
+y <- classvec2classmat(unlist(lapply (train, function(x) {x$is_iceberg})))
+
+# Training Set list
+nums <- sample(1:1604, 1300)
+
+# Organizing
+train_iceberg <- x[nums, , , ]
+train_truth <- y[nums, ]
+test_iceberg <- x[-nums, , , ]
+test_truth <- y[-nums, ]
+
+## Prepare model
+kernel_size = c(5,5)
+input_img = layer_input(shape = c(75, 75, 3), name="img")
+
+## Normalizing data
+input_img_norm = input_img %>%
+  layer_batch_normalization(momentum = 0.99)
+
+## input CNN
+input_CNN = input_img_norm %>%
+  layer_conv_2d(32, kernel_size = kernel_size, padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_max_pooling_2d(c(2,2)) %>%
+  layer_dropout(0.25) %>%
+  layer_conv_2d(64, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_max_pooling_2d(c(2,2)) %>%
+  layer_dropout(0.25) 
+
+## first residual layer
+input_CNN_residual = input_CNN %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_conv_2d(128, kernel_size = kernel_size, padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.25) %>%
+  layer_conv_2d(64, kernel_size = kernel_size, padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu()
+
+# Here is the pass where the layers are put together with the previous activation
+input_CNN_residual = layer_add(list(input_CNN_residual,input_CNN))
+
+## second residual layer
+input_CNN_residual = input_CNN_residual %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_conv_2d(128, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.25) %>%
+  layer_conv_2d(64, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu()
+
+# Here is the pass where the layers are put together with the previous activation
+input_CNN_residual = layer_add(list(input_CNN_residual,input_CNN))
+
+## final CNN
+top_CNN = input_CNN_residual %>%
+  layer_conv_2d(128, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_max_pooling_2d(c(2,2)) %>%
+  layer_conv_2d(256, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.25) %>%
+  layer_max_pooling_2d(c(2,2)) %>%
+  layer_conv_2d(512, kernel_size = kernel_size,padding = "same") %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.25) %>%
+  layer_max_pooling_2d(c(2,2)) %>%
+  layer_global_max_pooling_2d()
+
+## Output layer
+outputs = top_CNN %>%
+  layer_dense(512,activation = NULL) %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.5) %>%
+  layer_dense(256,activation = NULL) %>%
+  layer_batch_normalization(momentum = 0.99) %>%
+  layer_activation_elu() %>%
+  layer_dropout(0.5) %>%
+  layer_dense(2,activation = "softmax") ## not sure using softmax is the right thing to do...
+
+## Setting up model
+model_resNN <- keras_model(inputs = list(input_img), outputs = list(outputs))
+
+## Setting up functions for model evaluation and passes
+model_resNN %>% compile(optimizer = optimizer_adam(lr = 0.001),
+                  loss="binary_crossentropy",
+                  metrics = c("accuracy"))
+
+## Model set up summary
+summary(model_resNN)
+
+## Fitting the model
+model_resNN %>% fit(train_iceberg, train_truth, epochs = 10)
+
+## Trying on test data
+predictions_resnet <-  mean(round(predict(model_resNN, test_iceberg))[,2] == test_truth[,2])
+paste("Test Accuracy (ResNN):", predictions_resnet)
+
+```
+
+Here, middle convolutional layers are residual blocks.
+
+######################### SECTION IV #############################
+
+In this section, I begin working on Neural ODE's. I will go chunk by chunk and explain it in as much detail as possible. I will write pseudocode for the code chunks not yet completed. I will use lower case roman letters to distinguish between sections.
+
+Before doing any of that however, I will use the R Package Reticulate to demonstrate a python implementation and plot the loss results. This is a long chunk of code because Reticulate requires all code be in a single chunk - it won't hold memory from one chunk to another. I try my best to comment each section. Mind you, this is essentially source code for the original paper (i.e. it's not written by me - essentially, it's like rewriting the source code for a ggplot or dplyr package or something like that). I do my best to comment every section in the code in as much detail as possible. I always pull out the final results and code them in R. The --- dashed lines encompass this python section. I will include a separate document hoping to explain some errors if you run into them.
+
+EDIT: THIS CODE IS IN A SEPARATE RMD FILE. I was running into GPU issues trying to compile this along with the other code (keras in R). I was able to compile the code contained within the dashed lines in a separate .rmd file. I will be emailing both HTML files and both .rmd files!
+
+--------------------------------------------------------------------
+
+ First, I load reticulate (I did this earlier but doing it again for completion purposes)
+
+```{r, eval = FALSE}
+library(reticulate)
+use_virtualenv("r-reticulate")
+py_available(TRUE)
+```
+
+Here we go with the python code. 
+
+```{python, eval = FALSE}
+# Here, first loaded are some dependencies
+# These libraries range from the deep learning architectures
+# required for the neural ODE to work (such as torch) and
+# more essential libraries like math and numpy for
+# ODE and array operations; the matplotlab library is for graphics
+# purposes and the pandas library is for data frame manipulation
+# Cude allows access to GPU use
+
+##############
+import math
+import numpy as np
+from IPython.display import clear_output
+from tqdm import tqdm_notebook as tqdm
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.color_palette("bright")
+import matplotlib as mpl
+import matplotlib.cm as cm
+import pandas as pd
+
+import torch
+from torch import Tensor
+from torch import nn
+from torch.nn  import functional as F 
+from torch.autograd import Variable
+
+import torchvision
+
+use_cuda = torch.cuda.is_available() 
+##############
+
+# Next, here is the general ODE solve function we will use in the
+# forward pass later on. Euler's method is used here because it is
+# easy to implement - the step size is 0.05 (thus separating it
+# from ResNets)
+
+##############
+def ode_solve(z0, t0, t1, f):
+    """
+    Simplest Euler ODE initial value solver
+    """
+    h_max = 0.05
+    n_steps = math.ceil((abs(t1 - t0)/h_max).max().item())
+
+    h = (t1 - t0)/n_steps
+    t = t0
+    z = z0
+
+    for i_step in range(n_steps):
+        z = z + h * f(z, t)
+        t = t + h
+    return z
+##############
+
+# This function computes the derivatives required in the
+# forward pass and reduces the number of parameters with the
+# flatten parameters function. Flattening lowers the "denseness"
+# of your model layer to layer - more on this in the final report
+class ODEF(nn.Module):
+    def forward_with_grad(self, z, t, grad_outputs):
+        """Compute f and a df/dz, a df/dp, a df/dt"""
+        batch_size = z.shape[0]
+
+        out = self.forward(z, t)
+
+        a = grad_outputs
+        adfdz, adfdt, *adfdp = torch.autograd.grad(
+            (out,), (z, t) + tuple(self.parameters()), grad_outputs=(a),
+            allow_unused=True, retain_graph=True
+        )
+        # grad method automatically sums gradients for batch items, we have to expand them back 
+        if adfdp is not None:
+            adfdp = torch.cat([p_grad.flatten() for p_grad in adfdp]).unsqueeze(0)
+            adfdp = adfdp.expand(batch_size, -1) / batch_size
+        if adfdt is not None:
+            adfdt = adfdt.expand(batch_size, 1) / batch_size
+        return out, adfdz, adfdt, adfdp
+
+    def flatten_parameters(self):
+        p_shapes = []
+        flat_parameters = []
+        for p in self.parameters():
+            p_shapes.append(p.size())
+            flat_parameters.append(p.flatten())
+        return torch.cat(flat_parameters)
+##############
+
+# Here, this is the adjoint call of the method. Remember, this is used
+# in the backward pass and this is defined here as well along with the
+# augmented dynamics. Moreover, the integrals in the backward trajectory
+# of the backpropagation process are computed over here. The exact
+# mathematical details of the "augmented" state, I am still trying to
+# work out. I have more in the final report but for now, take this to be
+# the funky source code that it is!
+
+##############
+class ODEAdjoint(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, z0, t, flat_parameters, func):
+        assert isinstance(func, ODEF)
+        bs, *z_shape = z0.size()
+        time_len = t.size(0)
+
+        with torch.no_grad():
+            z = torch.zeros(time_len, bs, *z_shape).to(z0)
+            z[0] = z0
+            for i_t in range(time_len - 1):
+                z0 = ode_solve(z0, t[i_t], t[i_t+1], func)
+                z[i_t+1] = z0
+
+        ctx.func = func
+        ctx.save_for_backward(t, z.clone(), flat_parameters)
+        return z
+
+    @staticmethod
+    def backward(ctx, dLdz):
+        """
+        dLdz shape: time_len, batch_size, *z_shape
+        """
+        func = ctx.func
+        t, z, flat_parameters = ctx.saved_tensors
+        time_len, bs, *z_shape = z.size()
+        n_dim = np.prod(z_shape)
+        n_params = flat_parameters.size(0)
+
+        # Dynamics of augmented system to be calculated backwards in time
+        def augmented_dynamics(aug_z_i, t_i):
+            """
+            tensors here are temporal slices
+            t_i - is tensor with size: bs, 1
+            aug_z_i - is tensor with size: bs, n_dim*2 + n_params + 1
+            """
+            z_i, a = aug_z_i[:, :n_dim], aug_z_i[:, n_dim:2*n_dim]  # ignore parameters and time
+
+            # Unflatten z and a
+            z_i = z_i.view(bs, *z_shape)
+            a = a.view(bs, *z_shape)
+            with torch.set_grad_enabled(True):
+                t_i = t_i.detach().requires_grad_(True)
+                z_i = z_i.detach().requires_grad_(True)
+                func_eval, adfdz, adfdt, adfdp = func.forward_with_grad(z_i, t_i, grad_outputs=a)  # bs, *z_shape
+                adfdz = adfdz.to(z_i) if adfdz is not None else torch.zeros(bs, *z_shape).to(z_i)
+                adfdp = adfdp.to(z_i) if adfdp is not None else torch.zeros(bs, n_params).to(z_i)
+                adfdt = adfdt.to(z_i) if adfdt is not None else torch.zeros(bs, 1).to(z_i)
+
+            # Flatten f and adfdz
+            func_eval = func_eval.view(bs, n_dim)
+            adfdz = adfdz.view(bs, n_dim) 
+            return torch.cat((func_eval, -adfdz, -adfdp, -adfdt), dim=1)
+
+        dLdz = dLdz.view(time_len, bs, n_dim)  # flatten dLdz for convenience
+        with torch.no_grad():
+            ## Create placeholders for output gradients
+            # Prev computed backwards adjoints to be adjusted by direct gradients
+            adj_z = torch.zeros(bs, n_dim).to(dLdz)
+            adj_p = torch.zeros(bs, n_params).to(dLdz)
+            # In contrast to z and p we need to return gradients for all times
+            adj_t = torch.zeros(time_len, bs, 1).to(dLdz)
+
+            for i_t in range(time_len-1, 0, -1):
+                z_i = z[i_t]
+                t_i = t[i_t]
+                f_i = func(z_i, t_i).view(bs, n_dim)
+
+                # Compute direct gradients
+                dLdz_i = dLdz[i_t]
+                dLdt_i = torch.bmm(torch.transpose(dLdz_i.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1))[:, 0]
+
+                # Adjusting adjoints with direct gradients
+                adj_z += dLdz_i
+                adj_t[i_t] = adj_t[i_t] - dLdt_i
+
+                # Pack augmented variable
+                aug_z = torch.cat((z_i.view(bs, n_dim), adj_z, torch.zeros(bs, n_params).to(z), adj_t[i_t]), dim=-1)
+
+                # Solve augmented system backwards
+                aug_ans = ode_solve(aug_z, t_i, t[i_t-1], augmented_dynamics)
+
+                # Unpack solved backwards augmented system
+                adj_z[:] = aug_ans[:, n_dim:2*n_dim]
+                adj_p[:] += aug_ans[:, 2*n_dim:2*n_dim + n_params]
+                adj_t[i_t-1] = aug_ans[:, 2*n_dim + n_params:]
+
+                del aug_z, aug_ans
+
+            ## Adjust 0 time adjoint with direct gradients
+            # Compute direct gradients 
+            dLdz_0 = dLdz[0]
+            dLdt_0 = torch.bmm(torch.transpose(dLdz_0.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1))[:, 0]
+
+            # Adjust adjoints
+            adj_z += dLdz_0
+            adj_t[0] = adj_t[0] - dLdt_0
+        return adj_z.view(bs, *z_shape), adj_t, adj_p, None
+##############
+
+# Next, the code is all bunched up nicely into a class NeuralODE
+# This means that the previous classes all act as dependencies for
+# this class. The previous classes will be called upon when this
+# code is run. There is not much else to say here other than
+# this is just a compacting of everything defined thus far
+
+##############
+class NeuralODE(nn.Module):
+    def __init__(self, func):
+        super(NeuralODE, self).__init__()
+        assert isinstance(func, ODEF)
+        self.func = func
+
+    def forward(self, z0, t=Tensor([0., 1.]), return_whole_sequence=False):
+        t = t.to(z0)
+        z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func)
+        if return_whole_sequence:
+            return z
+        else:
+            return z[-1]
+##############
+
+# Here, we get batch normalization (defined in the final report)
+
+##############
+def norm(dim):
+    return nn.BatchNorm2d(dim)
+##############
+
+# Next, we find a convolutional block. This is similar to the ResNet 
+# code. It's simply defining a convolutional Neural Net
+
+##############
+def conv3x3(in_feats, out_feats, stride=1):
+    return nn.Conv2d(in_feats, out_feats, kernel_size=3, stride=stride, padding=1, bias=False)
+##############
+
+# Here, the code returns some relevant information about
+# the process thus far. The first line ppulls out the 
+# dimensions of the tensor image and the cat function
+# from torch simple puts together the results
+
+##############
+def add_time(in_tensor, t):
+    bs, c, w, h = in_tensor.shape
+    return torch.cat((in_tensor, t.expand(bs, 1, w, h)), dim=1)
+##############    
+
+# These next two classes embed a neural ODE into a convolutional
+# neural network. This is analgous to the Residual blocks being embedded
+# in the convolutional neural network in the ResNet Secion III. The
+# options for the convolutional blocks are similar to that of the 
+# R keras counterparts (number of neurons, kernel sizes, Relu activation, etc)
+class ConvODEF(ODEF):
+    def __init__(self, dim):
+        super(ConvODEF, self).__init__()
+        self.conv1 = conv3x3(dim + 1, dim)
+        self.norm1 = norm(dim)
+        self.conv2 = conv3x3(dim + 1, dim)
+        self.norm2 = norm(dim)
+
+    def forward(self, x, t):
+        xt = add_time(x, t)
+        h = self.norm1(torch.relu(self.conv1(xt)))
+        ht = add_time(h, t)
+        dxdt = self.norm2(torch.relu(self.conv2(ht)))
+        return dxdt
+        
+class ContinuousNeuralMNISTClassifier(nn.Module):
+    def __init__(self, ode):
+        super(ContinuousNeuralMNISTClassifier, self).__init__()
+        self.downsampling = nn.Sequential(
+            nn.Conv2d(1, 64, 3, 1),
+            norm(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 4, 2, 1),
+            norm(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 4, 2, 1),
+        )
+        self.feature = ode
+        self.norm = norm(64)
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(64, 10)
+
+    def forward(self, x):
+        x = self.downsampling(x)
+        x = self.feature(x)
+        x = self.norm(x)
+        x = self.avg_pool(x)
+        shape = torch.prod(torch.tensor(x.shape[1:])).item()
+        x = x.view(-1, shape)
+        out = self.fc(x)
+        return out
+################     
+
+################  
+func = ConvODEF(64)
+ode = NeuralODE(func)
+model = ContinuousNeuralMNISTClassifier(ode)
+if use_cuda:
+    model = model.cuda()
+################      
+
+# Here, the MNIST training data is loaded and normalized
+# using the prespecified mean and standard deviation. This is
+# a standard pre-processing in most neural net implementations
+# as can be seen in my previous implementations
+
+################  v
+img_std = 0.3081
+img_mean = 0.1307
+
+batch_size = 32
+train_loader = torch.utils.data.DataLoader(
+    torchvision.datasets.MNIST("data/mnist", train=True, download=True,
+                             transform=torchvision.transforms.Compose([
+                                 torchvision.transforms.ToTensor(),
+                                 torchvision.transforms.Normalize((img_mean,), (img_std,))
+                             ])
+    ),
+    batch_size=batch_size, shuffle=True
+)
+
+test_loader = torch.utils.data.DataLoader(
+    torchvision.datasets.MNIST("data/mnist", train=False, download=True,
+                             transform=torchvision.transforms.Compose([
+                                 torchvision.transforms.ToTensor(),
+                                 torchvision.transforms.Normalize((img_mean,), (img_std,))
+                             ])
+    ),
+    batch_size=32, shuffle=True
+)
+################
+
+# Here the optimizer is defined
+
+################  
+optimizer = torch.optim.Adam(model.parameters())
+################  
+
+# Now, this is where the training is done and the functions
+# previously defined are called. The train and test functions
+# are for the separate outputs. The loss function is used 
+# here as well with the "criterion" function. This is a call to
+# cross-entropy function. The loss results are ultimately 
+# returned in the final outputs
+
+################  
+def train(epoch):
+    num_items = 0
+    train_losses = []
+
+    model.train()
+    criterion = nn.CrossEntropyLoss()
+    print(f"Training Epoch {epoch}...")
+    for batch_idx, (data, target) in tqdm(enumerate(train_loader), total=len(train_loader)):
+        if use_cuda:
+            data = data.cuda()
+            target = target.cuda()
+        optimizer.zero_grad()
+        output = model(data)
+        loss = criterion(output, target) 
+        loss.backward()
+        optimizer.step()
+
+        train_losses += [loss.item()]
+        num_items += data.shape[0]
+    print('Train loss: {:.5f}'.format(np.mean(train_losses)))
+    return train_losses
+    
+    
+def test():
+    accuracy = 0.0
+    num_items = 0
+
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+    print(f"Testing...")
+    with torch.no_grad():
+        for batch_idx, (data, target) in tqdm(enumerate(test_loader),  total=len(test_loader)):
+            if use_cuda:
+                data = data.cuda()
+                target = target.cuda()
+            output = model(data)
+            accuracy += torch.sum(torch.argmax(output, dim=1) == target).item()
+            num_items += data.shape[0]
+    accuracy = accuracy * 100 / num_items
+    print("Test Accuracy: {:.3f}%".format(accuracy))
+################  
+
+# Next, here is some initialization and the number of epochs is defined
+
+################  
+n_epochs = 1
+test()
+train_losses = []
+################  
+
+# Finally, everything above is called and run
+
+################  
+for epoch in range(1, n_epochs + 1):
+    train_losses += train(epoch)
+    test()
+################  
+
+# The loss results are pulled out in the form of a CSV (using pandas)
+
+################  
+loss_data = pd.DataFrame({"loss": train_losses})
+loss_data["Trained_Images"] = loss_data.index * batch_size
+loss_data["Halflife_Loss"] = loss_data.loss.ewm(halflife=10).mean()
+loss_data.to_csv('neural_ode_loss.csv')
+################  
+```
+
+
+
+```{r, eval = FALSE}
+# Reading in loss results from python
+neuralODELoss = read.csv("neural_ode_loss.csv", header = T)
+
+# Plotting
+neuralODELoss %>% 
+  ggplot(aes(x = Trained_Images, y = loss)) +
+  geom_line(color = "red", size = 1.1) +
+  theme_bw() +
+  labs(x = "Number of Images Trained\nEpoch = Batch Size * Iteration", y = "Cross-Entropy Loss") +
+  ggtitle("Neural ODE Training Loss") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+----------------------------------------------------------------
+
+Now, here is where I begin writing functions and what not for an R implementation - THIS SECTION IS INCOMPLETE! However, what I could do is there. I will look to continue to complete these over the next little while,
+
+SECTION IV.i - Relevant Packages
+
+Here, I load some relevant libraries for Neural ODE's. Note: I repeat some of the ones from before for the purpose of completeness. 
+
+```{r}
+library(tidyverse)
+library(keras)
+library(tensorflow)
+```
+
+SECTION IV.ii - ODESolver
+
+Here, I develop the "black-box" ODE solver. For simplicity purposes, I will limit myself to Euler's method but with an adjustable step size (thus separating it from ResNets)
+
+```{r}
+ode_solve <- function(z0, t0, t1, f) {
+  
+  # Step Size Choice:
+  h_max = 0.05
+  n_steps = ceiling((abs(t1 - t0)/h_max))
+  
+  # Initializing
+  h = (t1 - t0)/n_steps
+  t = t0
+  z = z0
+  
+  # Running algorithm
+  for (i in 1:n_steps) {
+    z = z + h*f(z, t)
+    t = t + h
+  }
+  
+  # Returning
+  return(z)
+  
+}
+```
+
+Now, let's test the function to see if it's working correctly.
+
+```{r}
+# Setting up function
+a <- function(z, t){
+  b = z
+  return(b)
+}
+
+ode_solve(1, 1, 5, a)
+```
+
+This result matches the Python result - we can move on!
+
+SECTION IV.iii - Adjoint Method
+
+SECTION IV.iv - Augmented Dynamics
+
+SECTION IV.v - Forward Pass
+
+First, I define the forward method with torch autograd:
+
+
+Now, let's take a look at the results
+
+
+SECTION IV.vi - Backward Pass
+
+SECTION IV.vii - Convolutional Code
+
+In this chunk of code, I define a batch normalization function, a convolution function, a time function, and the overall Neural ODE classifier
+
+```{r}
+#convODEF <- function(ODEF){
+  
+  # Initializing
+ # conv1 = layer_conv_2d()
+#}
+```
+
+
+SECTION IV.viii - Data Load In
+
+Here, I load the MNIST Data:
+
+```{r}
+# First, I pull the general data sets from tensorflow
+#datasets <- tf$contrib$learn$datasets
+
+# Here, I pull specifically the mnist data
+#mnist <- datasets$mnist$read_data_sets("MNIST-data", one_hot = TRUE)
+```
+
+
+SECTION IV.viv - Training Function
+
+SECTION IV.x - Test Function
+
+SECTION IV.xi - Neural ODE Run
+
+SECTION IV.xii - Outputs/Results
+
+
+
